@@ -7,7 +7,7 @@ const AIInsightsPanel = () => {
 
   useEffect(() => {
 
-    axios.get("http://localhost:5000/api/finance/ai-insights")
+    axios.get(`http://${window.location.hostname}:8800/api/finance/ai-insights`)
       .then(res => setInsights(res.data))
       .catch(err => console.log(err));
 

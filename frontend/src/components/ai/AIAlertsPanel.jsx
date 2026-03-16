@@ -7,7 +7,7 @@ const AIAlertsPanel = () => {
 
   useEffect(() => {
 
-    axios.get("http://localhost:5000/api/finance/ai-alerts")
+    axios.get(`http://${window.location.hostname}:8800/api/finance/ai-alerts`)
       .then(res => setAlerts(res.data))
       .catch(err => console.log(err));
 

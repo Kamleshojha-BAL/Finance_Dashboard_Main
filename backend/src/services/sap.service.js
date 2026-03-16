@@ -1,110 +1,107 @@
 import db from "../config/db.js";
 
 /* ─────────────────────────────────────────────
-   GL LABELS — from user's GL Master List
+   CALENDAR → SAP PERIOD CONVERSION
+   SAP FY starts April. Apr=001, May=002 … Mar=012
    ───────────────────────────────────────────── */
-
-const GL_LABELS = {
-  '0060101010': 'Dom Sale FeCr',
-  '0060101016': 'Dom Sale Cr brqt',
-  '0060102010': 'Exp Sale FeCr',
-  '0060102020': 'Exp Third Party Sale',
-  '0060102060': 'Duty Drawback',
-  '0060105010': 'Sales Tailing',
-  '0060201010': 'Int on Bank Deposits',
-  '0060201020': 'Int on Investments',
-  '0060201030': 'Interest on Others',
-  '0060201040': 'Interest from Others',
-  '0060202030': 'Realised Forex P/L',
-  '0060202031': 'Manual Forex P/L',
-  '0060202120': 'Sales Scrap',
-  '0060202130': 'Creditors W/Back',
-  '0060202140': 'Lia & Prov W/Back',
-  '0060202150': 'Miscellanous Receipt',
-  '0060202160': 'Insurance Claims',
-  '0060202180': 'Asset Sale Clearing'
-};
-
-/* Revenue from Operations GLs */
-const REVENUE_OPS_GLS = [
-  '0060101010', '0060101016', '0060102010', '0060102020',
-  '0060102060', '0060105010', '0060202120'
-];
-
-/* Other Income GLs */
-const OTHER_INCOME_GLS = [
-  '0060201010', '0060201020', '0060201030', '0060201040',
-  '0060202130', '0060202140', '0060202150', '0060202160', '0060202180'
-];
+function toSAPPeriod(calMonth, calYear) {
+  const m = Number(calMonth), y = Number(calYear);
+  if (m >= 4) return { period: String(m - 3).padStart(3, '0'), fyear: String(y) };
+  return { period: String(m + 9).padStart(3, '0'), fyear: String(y - 1) };
+}
 
 const toCrores = (val) => +(val / 10000000).toFixed(2);
 
+/* KPI_CODE → numeric ID mapping (frontend expects integer IDs 1-16) */
+const KPI_CODE_TO_ID = {
+  GP_MARGIN: 1, NP_MARGIN: 2, EBIT_MARGIN: 3, OP_RATIO: 4, EBITDA_MARGIN: 5,
+  ROA: 6, ROE: 7, ROI: 8, DEP_RATIO: 9, CAPEX_RATIO: 10, INV_TURNOVER: 11,
+  EPS: 12, OCF: 13, FCF: 14, CASH_POS: 15, CURRENT_RATIO: 16
+};
+
+/* Target thresholds per KPI ID */
+const KPI_TARGETS = {
+  1: '>=25%', 2: '>=8%', 3: '>=10%', 4: '<85%', 5: '>=15%',
+  6: '>=5%', 7: '>=12%', 8: '>=6%', 9: 'Monitor', 10: '5-15%',
+  11: '>=4x', 12: 'Growth YoY', 13: 'Positive', 14: 'Positive',
+  15: 'Adequate', 16: '1.5-3.0x'
+};
+
 /* ─────────────────────────────────────────────
-   KPI METADATA — matches kpi_finance_master
+   GET KPI DATA — from finance_kpi_results
    ───────────────────────────────────────────── */
-const KPI_META = {
-  1:  { name: 'Gross Profit Margin',   category: 'Profitability',    unit: '%',        target: '>=25%' },
-  2:  { name: 'Net Profit Margin',     category: 'Profitability',    unit: '%',        target: '>=8%' },
-  3:  { name: 'EBIT Margin',           category: 'Profitability',    unit: '%',        target: '>=10%' },
-  4:  { name: 'Operating Ratio',       category: 'Cost Efficiency',  unit: '%',        target: '<85%' },
-  5:  { name: 'EBITDA Margin',         category: 'Profitability',    unit: '%',        target: '>=15%' },
-  6:  { name: 'ROA',                   category: 'Returns',          unit: '%',        target: '>=5%' },
-  7:  { name: 'ROE',                   category: 'Returns',          unit: '%',        target: '>=12%' },
-  8:  { name: 'ROI',                   category: 'Returns',          unit: '%',        target: '>=6%' },
-  9:  { name: 'Depreciation Ratio',    category: 'Asset Management', unit: '%',        target: 'Monitor' },
-  10: { name: 'CapEx Ratio',           category: 'Investment',       unit: '%',        target: '5-15%' },
-  11: { name: 'Inventory Turnover',    category: 'Working Capital',  unit: 'Times',    target: '>=4x' },
-  12: { name: 'EPS',                   category: 'Valuation',        unit: 'Rs',       target: 'Growth YoY' },
-  13: { name: 'Operating Cash Flow',   category: 'Cash Flow',        unit: 'Rs Cr',    target: 'Positive' },
-  14: { name: 'Free Cash Flow',        category: 'Cash Flow',        unit: 'Rs Cr',    target: 'Positive' },
-  15: { name: 'Cash Position',         category: 'Liquidity',        unit: 'Rs Cr',    target: 'Adequate' },
-  16: { name: 'Current Ratio',         category: 'Liquidity',        unit: 'Times',    target: '1.5-3.0x' }
+export const getKPIData = async (month, year) => {
+  if (!month || !year) return [];
+
+  const { period, fyear } = toSAPPeriod(month, year);
+
+  const [rows] = await db.execute(
+    `SELECT KPI_CODE, KPI_NAME, KPI_CATEGORY, VALUE, UNIT, NUMERATOR, DENOMINATOR
+     FROM finance_kpi_results
+     WHERE PERIOD = ? AND FYEAR = ?
+     ORDER BY KPI_CODE`,
+    [period, fyear]
+  );
+
+  // Build lookup from DB rows
+  const rowMap = {};
+  rows.forEach(r => { rowMap[r.KPI_CODE] = r; });
+
+  // Return array of 16 KPIs with numeric IDs for frontend
+  return Object.entries(KPI_CODE_TO_ID).map(([code, id]) => {
+    const row = rowMap[code];
+    const value = row && row.VALUE !== null ? Number(row.VALUE) : null;
+    return {
+      id,
+      name: row ? row.KPI_NAME : code,
+      category: row ? row.KPI_CATEGORY : '',
+      value,
+      unit: row ? row.UNIT : '',
+      target: KPI_TARGETS[id] || '',
+      numerator: row && row.NUMERATOR !== null ? Number(row.NUMERATOR) : null,
+      denominator: row && row.DENOMINATOR !== null ? Number(row.DENOMINATOR) : null,
+      status: value !== null ? 'active' : 'pending'
+    };
+  });
 };
 
 /* ─────────────────────────────────────────────
    MAIN DASHBOARD API
    ───────────────────────────────────────────── */
 export const getDashboardData = async (month, year) => {
+  if (!month || !year) return { revenueSummary: {}, revenueBreakdown: [], otherIncomeBreakdown: [], kpis: [] };
 
-  const dateFilter = month && year
-    ? 'AND MONTH(POSTDATE) = ? AND YEAR(POSTDATE) = ?'
-    : '';
-  const dateParams = month && year ? [Number(month), Number(year)] : [];
+  const { period, fyear } = toSAPPeriod(month, year);
 
-  // Revenue from Operations
-  const [revenueRows] = await db.execute(`
-    SELECT GLNO, SUM(AMOUNTINCOMPANY) AS amount
-    FROM zfi_finance_accounts_updated
-    WHERE GLNO IN (${REVENUE_OPS_GLS.map(() => '?').join(',')})
-    ${dateFilter}
-    GROUP BY GLNO
-    ORDER BY SUM(AMOUNTINCOMPANY) DESC
-  `, [...REVENUE_OPS_GLS, ...dateParams]);
+  // Get all Revenue rows from finance_period_summary
+  const [revRows] = await db.execute(
+    `SELECT GLNO, GL_DESC, CATEGORY, NET_AMOUNT
+     FROM finance_period_summary
+     WHERE PERIOD = ? AND FYEAR = ? AND PL_GROUP = 'Revenue'
+     ORDER BY ABS(NET_AMOUNT) DESC`,
+    [period, fyear]
+  );
 
-  // Other Income
-  const [otherIncRows] = await db.execute(`
-    SELECT GLNO, SUM(AMOUNTINCOMPANY) AS amount
-    FROM zfi_finance_accounts_updated
-    WHERE GLNO IN (${OTHER_INCOME_GLS.map(() => '?').join(',')})
-    ${dateFilter}
-    GROUP BY GLNO
-    ORDER BY SUM(AMOUNTINCOMPANY) DESC
-  `, [...OTHER_INCOME_GLS, ...dateParams]);
+  // Split by category
+  const revenueOpsRows = revRows.filter(r => r.CATEGORY === 'Rev. from Operation');
+  const otherIncRows = revRows.filter(r => r.CATEGORY === 'Other Income');
 
-  // Totals
-  const totalRevenueOps = revenueRows.reduce((s, r) => s + Number(r.amount), 0);
-  const totalOtherIncome = otherIncRows.reduce((s, r) => s + Number(r.amount), 0);
+  const totalRevenueOps = revenueOpsRows.reduce((s, r) => s + Number(r.NET_AMOUNT), 0);
+  const totalOtherIncome = otherIncRows.reduce((s, r) => s + Number(r.NET_AMOUNT), 0);
   const totalRevenue = totalRevenueOps + totalOtherIncome;
 
   // Export vs Domestic
-  const domesticRevenue = revenueRows
-    .filter(r => ['0060101010', '0060101016'].includes(r.GLNO))
-    .reduce((s, r) => s + Number(r.amount), 0);
-  const exportRevenue = revenueRows
-    .filter(r => ['0060102010', '0060102020'].includes(r.GLNO))
-    .reduce((s, r) => s + Number(r.amount), 0);
+  const exportGLs = ['0060102010', '0060102020'];
+  const domesticGLs = ['0060101010', '0060101016'];
 
-  // 16 KPIs from kpi_finance_transaction
+  const exportRevenue = revenueOpsRows
+    .filter(r => exportGLs.includes(r.GLNO))
+    .reduce((s, r) => s + Number(r.NET_AMOUNT), 0);
+  const domesticRevenue = revenueOpsRows
+    .filter(r => domesticGLs.includes(r.GLNO))
+    .reduce((s, r) => s + Number(r.NET_AMOUNT), 0);
+
+  // 16 KPIs
   const kpis = await getKPIData(month, year);
 
   const revenueSummary = {
@@ -117,228 +114,240 @@ export const getDashboardData = async (month, year) => {
     domesticPct: totalRevenueOps > 0 ? +((domesticRevenue / totalRevenueOps) * 100).toFixed(1) : 0
   };
 
-  const revenueBreakdown = revenueRows.map(r => ({
+  const revenueBreakdown = revenueOpsRows.map(r => ({
     glno: r.GLNO,
-    label: GL_LABELS[r.GLNO] || r.GLNO,
-    amount: Number(r.amount),
-    crores: toCrores(Number(r.amount))
+    label: r.GL_DESC || r.GLNO,
+    amount: Number(r.NET_AMOUNT),
+    crores: toCrores(Number(r.NET_AMOUNT))
   }));
 
   const otherIncomeBreakdown = otherIncRows
-    .filter(r => Number(r.amount) !== 0)
+    .filter(r => Number(r.NET_AMOUNT) !== 0)
     .map(r => ({
       glno: r.GLNO,
-      label: GL_LABELS[r.GLNO] || r.GLNO,
-      amount: Number(r.amount),
-      crores: toCrores(Number(r.amount))
+      label: r.GL_DESC || r.GLNO,
+      amount: Number(r.NET_AMOUNT),
+      crores: toCrores(Number(r.NET_AMOUNT))
     }));
 
-  return {
-    revenueSummary,
-    revenueBreakdown,
-    otherIncomeBreakdown,
-    kpis
-  };
+  return { revenueSummary, revenueBreakdown, otherIncomeBreakdown, kpis };
 };
 
 /* ─────────────────────────────────────────────
-   P&L TREND (Monthly)
+   P&L TREND (Monthly) — from finance_period_summary
    ───────────────────────────────────────────── */
 export const getPLTrend = async () => {
-
   const [rows] = await db.execute(`
     SELECT
-      MONTH(POSTDATE) AS month,
-      YEAR(POSTDATE) AS year,
-      SUM(CASE WHEN GLNO IN (${REVENUE_OPS_GLS.map(() => '?').join(',')}) THEN AMOUNTINCOMPANY ELSE 0 END) AS revenueFromOps,
-      SUM(CASE WHEN GLNO IN (${OTHER_INCOME_GLS.map(() => '?').join(',')}) THEN AMOUNTINCOMPANY ELSE 0 END) AS otherIncome,
-      SUM(AMOUNTINCOMPANY) AS totalRevenue
-    FROM zfi_finance_accounts_updated
-    GROUP BY YEAR(POSTDATE), MONTH(POSTDATE)
-    ORDER BY YEAR(POSTDATE), MONTH(POSTDATE)
-  `, [...REVENUE_OPS_GLS, ...OTHER_INCOME_GLS]);
+      PERIOD, FYEAR,
+      SUM(CASE WHEN CATEGORY = 'Rev. from Operation' THEN NET_AMOUNT ELSE 0 END) AS revenueFromOps,
+      SUM(CASE WHEN CATEGORY != 'Rev. from Operation' THEN NET_AMOUNT ELSE 0 END) AS otherIncome,
+      SUM(NET_AMOUNT) AS totalRevenue
+    FROM finance_period_summary
+    WHERE PL_GROUP = 'Revenue'
+    GROUP BY FYEAR, PERIOD
+    ORDER BY FYEAR, PERIOD
+  `);
 
-  return rows.map(r => ({
-    month: r.month,
-    year: r.year,
-    label: `${['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][r.month]} ${r.year}`,
-    revenueFromOps: toCrores(Number(r.revenueFromOps)),
-    otherIncome: toCrores(Number(r.otherIncome)),
-    totalRevenue: toCrores(Number(r.totalRevenue))
-  }));
+  // Convert SAP period back to calendar month for display
+  const periodToMonth = (period, fyear) => {
+    const p = Number(period);
+    const fy = Number(fyear);
+    if (p <= 9) return { month: p + 3, year: fy };
+    return { month: p - 9, year: fy + 1 };
+  };
+
+  const MONTH_NAMES = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+  return rows.map(r => {
+    const { month, year } = periodToMonth(r.PERIOD, r.FYEAR);
+    return {
+      month,
+      year,
+      label: `${MONTH_NAMES[month]} ${year}`,
+      revenueFromOps: toCrores(Number(r.revenueFromOps)),
+      otherIncome: toCrores(Number(r.otherIncome)),
+      totalRevenue: toCrores(Number(r.totalRevenue))
+    };
+  });
 };
 
 /* ─────────────────────────────────────────────
    REVENUE MIX (Pie Chart)
    ───────────────────────────────────────────── */
 export const getRevenueMix = async (month, year) => {
+  if (!month || !year) return [];
 
-  const dateFilter = month && year
-    ? 'AND MONTH(POSTDATE) = ? AND YEAR(POSTDATE) = ?'
-    : '';
-  const dateParams = month && year ? [Number(month), Number(year)] : [];
+  const { period, fyear } = toSAPPeriod(month, year);
 
-  const [rows] = await db.execute(`
-    SELECT GLNO, SUM(AMOUNTINCOMPANY) AS revenue
-    FROM zfi_finance_accounts_updated
-    WHERE GLNO IN (${REVENUE_OPS_GLS.map(() => '?').join(',')})
-    ${dateFilter}
-    GROUP BY GLNO
-    ORDER BY SUM(AMOUNTINCOMPANY) DESC
-  `, [...REVENUE_OPS_GLS, ...dateParams]);
+  const [rows] = await db.execute(
+    `SELECT GLNO, GL_DESC, NET_AMOUNT
+     FROM finance_period_summary
+     WHERE PERIOD = ? AND FYEAR = ? AND CATEGORY = 'Rev. from Operation'
+     ORDER BY ABS(NET_AMOUNT) DESC`,
+    [period, fyear]
+  );
 
   return rows
-    .filter(r => Number(r.revenue) > 0)
+    .filter(r => Number(r.NET_AMOUNT) > 0)
     .map(r => ({
-      name: GL_LABELS[r.GLNO] || r.GLNO,
+      name: r.GL_DESC || r.GLNO,
       glno: r.GLNO,
-      value: toCrores(Number(r.revenue)),
-      amount: Number(r.revenue)
+      value: toCrores(Number(r.NET_AMOUNT)),
+      amount: Number(r.NET_AMOUNT)
     }));
 };
 
 /* ─────────────────────────────────────────────
-   COST STRUCTURE (needs 7xxx series)
+   COST STRUCTURE — from finance_period_summary 7series
    ───────────────────────────────────────────── */
-export const getCostStructure = async () => {
+export const getCostStructure = async (month, year) => {
+  const params = [];
+  let periodFilter = '';
+
+  if (month && year) {
+    const { period, fyear } = toSAPPeriod(month, year);
+    periodFilter = 'AND PERIOD = ? AND FYEAR = ?';
+    params.push(period, fyear);
+  }
+
   const [rows] = await db.execute(`
-    SELECT GLNO, ABS(SUM(AMOUNTINCOMPANY)) AS amount
-    FROM zfi_finance_accounts_updated
-    WHERE GLNO LIKE '007%' OR GLNO LIKE '7%'
-    GROUP BY GLNO
-    ORDER BY ABS(SUM(AMOUNTINCOMPANY)) DESC
-    LIMIT 10
-  `);
+    SELECT CATEGORY, SUM(ABS(NET_AMOUNT)) AS amount
+    FROM finance_period_summary
+    WHERE PL_GROUP = 'Expense' ${periodFilter}
+    GROUP BY CATEGORY
+    ORDER BY SUM(ABS(NET_AMOUNT)) DESC
+  `, params);
 
   if (rows.length === 0) {
-    return { status: 'pending', message: 'Awaiting 7xxx GL series.', data: [] };
+    return { status: 'pending', message: 'No expense data available.', data: [] };
   }
-  return { status: 'active', data: rows };
+
+  return {
+    status: 'active',
+    data: rows.map(r => ({
+      category: r.CATEGORY,
+      amount: Number(r.amount),
+      crores: toCrores(Number(r.amount))
+    }))
+  };
 };
 
 /* ─────────────────────────────────────────────
-   DAILY REVENUE TREND
+   REFRESH KPI — calls sp_build_finance_summary
    ───────────────────────────────────────────── */
-export const getDailyRevenueTrend = async () => {
-  const [rows] = await db.execute(`
-    SELECT POSTDATE AS date, SUM(AMOUNTINCOMPANY) AS dailyRevenue
-    FROM zfi_finance_accounts_updated
-    WHERE GLNO IN (${REVENUE_OPS_GLS.map(() => '?').join(',')})
-    GROUP BY POSTDATE
-    ORDER BY POSTDATE
-  `, REVENUE_OPS_GLS);
-
-  return rows.map(r => ({
-    date: r.date,
-    revenue: toCrores(Number(r.dailyRevenue))
-  }));
+export const refreshKPI = async (month, year) => {
+  const { period, fyear } = toSAPPeriod(month, year);
+  await db.execute("CALL sp_build_finance_summary(?, ?)", [period, fyear]);
+  return { refreshed: true, period, fyear, month, year };
 };
 
 /* ─────────────────────────────────────────────
-   REFRESH KPI — calls the stored procedure
-   ───────────────────────────────────────────── */
-export const refreshKPI = async (month, year, empId) => {
-  await db.execute("CALL SP_REFRESH_FINANCE_KPI_TRANSACTION(?,?,?)", [
-    Number(month), Number(year), empId || 'SYSTEM'
-  ]);
-  return { refreshed: true, month, year };
-};
-
-/* ─────────────────────────────────────────────
-   GET KPI FORMULA VALUES — raw component values for formula breakdown
+   GET KPI FORMULA VALUES — component values for modal
    ───────────────────────────────────────────── */
 export const getKPIFormulaValues = async (month, year) => {
   if (!month || !year) return {};
-  const m = Number(month), y = Number(year);
 
-  const sumGL = async (whereClause, params = []) => {
-    const [rows] = await db.execute(
-      `SELECT COALESCE(SUM(AMOUNTINCOMPANY), 0) AS total FROM zfi_finance_accounts_updated WHERE ${whereClause} AND MONTH(POSTDATE) = ? AND YEAR(POSTDATE) = ?`,
-      [...params, m, y]
-    );
-    return Number(rows[0].total);
-  };
+  const { period, fyear } = toSAPPeriod(month, year);
 
-  const glSum = async (glnos) => {
-    const [rows] = await db.execute(
-      `SELECT GLNO, COALESCE(SUM(AMOUNTINCOMPANY), 0) AS total FROM zfi_finance_accounts_updated WHERE GLNO IN (${glnos.map(() => '?').join(',')}) AND MONTH(POSTDATE) = ? AND YEAR(POSTDATE) = ? GROUP BY GLNO`,
-      [...glnos, m, y]
-    );
-    const result = {};
-    glnos.forEach(gl => { result[gl] = 0; });
-    rows.forEach(r => { result[r.GLNO] = Number(r.total); });
-    return result;
-  };
+  // Single query to get all summary rows for the period
+  const [allRows] = await db.execute(
+    `SELECT GLNO, GL_DESC, CATEGORY, BS_GROUP, PL_GROUP, NET_AMOUNT
+     FROM finance_period_summary
+     WHERE PERIOD = ? AND FYEAR = ?`,
+    [period, fyear]
+  );
 
-  // Get individual GL values for revenue & other income
-  const revGLValues = await glSum(REVENUE_OPS_GLS);
-  const otherGLValues = await glSum(OTHER_INCOME_GLS);
+  // Helper: sum NET_AMOUNT for rows matching a filter
+  const sumBy = (filterFn) => allRows.filter(filterFn).reduce((s, r) => s + Number(r.NET_AMOUNT), 0);
 
-  const revOps = Object.values(revGLValues).reduce((s, v) => s + v, 0);
-  const otherIncome = Object.values(otherGLValues).reduce((s, v) => s + v, 0);
+  // Revenue components
+  const revOps = sumBy(r => r.CATEGORY === 'Rev. from Operation');
+  const otherIncome = sumBy(r => r.CATEGORY === 'Other Income');
   const totalRevenue = revOps + otherIncome;
 
-  // Expense components
-  const cogs = await sumGL(
-    `(GLNO BETWEEN '0070101010' AND '0070101999' OR GLNO BETWEEN '0070301000' AND '0070301999' OR GLNO BETWEEN '0070401010' AND '0070401999' OR GLNO BETWEEN '0070501020' AND '0070501999' OR GLNO BETWEEN '0070801010' AND '0070801999' OR GLNO BETWEEN '0070802000' AND '0070802999' OR GLNO BETWEEN '0070806000' AND '0070806999' OR GLNO BETWEEN '0070812010' AND '0070812999' OR GLNO BETWEEN '0070803000' AND '0070803999')`
-  );
-  const depreciation = await sumGL(`GLNO BETWEEN '0070601010' AND '0070601999'`);
-  const financeCost = await sumGL(`GLNO BETWEEN '0070701000' AND '0070701999'`);
-  const totalExpenses = await sumGL(`GLNO BETWEEN '0070000000' AND '0079999999'`);
+  // Expense components from 7series
+  const cogs = sumBy(r => r.CATEGORY === 'Cost of Material Consumed');
+  const changesInInv = sumBy(r => r.CATEGORY === 'Changes in Inventories');
+  const employeeCost = sumBy(r => r.CATEGORY === 'Employee Cost');
+  const powerCost = sumBy(r => r.CATEGORY === 'Power & Fuel Cost');
+  const otherExp = sumBy(r => r.CATEGORY === 'Other Expenses');
+  const depreciation = sumBy(r => r.CATEGORY === 'Depreciation');
+  const financeCost = sumBy(r => r.CATEGORY === 'Finance Cost');
+  const taxExp = sumBy(r => r.CATEGORY === 'Tax Expenses');
+  const totalExpenses = sumBy(r => r.PL_GROUP === 'Expense');
 
-  // Balance sheet
-  const totalAssets = await sumGL(`GLNO BETWEEN '0040000000' AND '0059999999'`);
-  const equity = await sumGL(`GLNO BETWEEN '0010000000' AND '0019999999'`);
-  const currentAssets = await sumGL(`GLNO BETWEEN '0050000000' AND '0059999999'`);
-  const currentLiab = await sumGL(`GLNO BETWEEN '0030000000' AND '0039999999'`);
-  const inventory = await sumGL(`GLNO BETWEEN '0050200000' AND '0050299999'`);
-  const cash = await sumGL(`GLNO BETWEEN '0050401110' AND '0050402122'`);
-  const capex = await sumGL(`GLNO BETWEEN '0040301000' AND '0040399999'`);
+  // Balance sheet components
+  const totalAssets = sumBy(r => r.BS_GROUP === 'Non Current Assets' || r.BS_GROUP === 'Current Assets');
+  const equity = sumBy(r => r.BS_GROUP === 'Equity' || r.BS_GROUP === 'Other Equity');
+  const currentAssets = sumBy(r => r.BS_GROUP === 'Current Assets');
+  const currentLiab = sumBy(r => r.BS_GROUP === 'Current Liab');
+  const nonCurrentLiab = sumBy(r => r.BS_GROUP === 'Non Current Liability');
 
-  const invIncomeGLs = await glSum(['0060201010', '0060201020']);
-  const invIncome = Object.values(invIncomeGLs).reduce((s, v) => s + v, 0);
-  const investments = await sumGL(`(GLNO BETWEEN '0040200000' AND '0040299999' OR GLNO = '0050601512')`);
+  // Specific GL-based components
+  const inventory = sumBy(r => r.GLNO && (r.GLNO.startsWith('005020') || r.GLNO.startsWith('005021') || r.GLNO.startsWith('005022') || r.GLNO.startsWith('005023')));
+  const cash = sumBy(r => r.GLNO && (r.GLNO.startsWith('005040')));
+  const capex = sumBy(r => r.GLNO && r.GLNO.startsWith('004030'));
+
+  // Gross block & accumulated depreciation for dep ratio
+  const grossBlock = sumBy(r => r.GLNO && (r.GLNO >= '0040101010' && r.GLNO <= '0040201030'));
+  const accumDep = sumBy(r => r.GLNO && (r.GLNO >= '0040101022' && r.GLNO <= '0050601512') && r.GL_DESC && r.GL_DESC.toLowerCase().includes('dep'));
+
+  // Investment income & investments for ROI
+  const invIncome = sumBy(r => ['0060201010', '0060201020'].includes(r.GLNO));
+  const investments = sumBy(r => (r.GLNO >= '0040200000' && r.GLNO <= '0040299999') || r.GLNO === '0050601512');
+
+  // Export breakdown
+  const expSaleFeCr = sumBy(r => r.GLNO === '0060102010');
+  const expThirdParty = sumBy(r => r.GLNO === '0060102020');
+  const exportTotal = expSaleFeCr + expThirdParty;
 
   const netIncome = totalRevenue - totalExpenses;
-  const shares = 93325411;
+  const shares = 933254110;
+
   const cr = (v) => `Rs ${(v / 10000000).toFixed(2)} Cr`;
   const pct = (v) => `${v.toFixed(2)}%`;
 
-  // Export breakdown
-  const expSaleFeCr = revGLValues['0060102010'] || 0;
-  const expThirdParty = revGLValues['0060102020'] || 0;
-  const exportTotal = expSaleFeCr + expThirdParty;
+  // OpEx = TotalExp - Finance Cost - Depreciation
+  const opex = totalExpenses - financeCost - depreciation;
+  const ebit = revOps - opex;
+  const ebitda = ebit + depreciation;
 
-  // Build formula values per KPI
+  // Revenue GL values for card popups
+  const revGLValues = {};
+  const otherGLValues = {};
+  allRows.filter(r => r.CATEGORY === 'Rev. from Operation').forEach(r => { revGLValues[r.GLNO] = Number(r.NET_AMOUNT); });
+  allRows.filter(r => r.CATEGORY === 'Other Income').forEach(r => { otherGLValues[r.GLNO] = Number(r.NET_AMOUNT); });
+
   const formulaValues = {
     1: { // GP Margin
-      revOps: cr(revOps), cogs: cr(cogs),
-      grossProfit: cr(revOps - cogs),
-      result: revOps !== 0 ? pct((revOps - cogs) / revOps * 100) : '--'
+      revOps: cr(revOps), cogs: cr(Math.abs(cogs)),
+      grossProfit: cr(revOps - Math.abs(cogs)),
+      result: revOps !== 0 ? pct((revOps - Math.abs(cogs)) / revOps * 100) : '--'
     },
     2: { // NP Margin
       totalRevenue: cr(totalRevenue), totalExpenses: cr(totalExpenses),
       netProfit: cr(netIncome),
-      result: totalRevenue !== 0 ? pct((totalRevenue - totalExpenses) / totalRevenue * 100) : '--'
+      result: totalRevenue !== 0 ? pct(netIncome / totalRevenue * 100) : '--'
     },
-    3: { // EBIT
+    3: { // EBIT Margin
       revOps: cr(revOps), totalExpenses: cr(totalExpenses),
       financeCost: cr(financeCost), depreciation: cr(depreciation),
-      ebit: cr(revOps - totalExpenses + financeCost + depreciation),
-      result: revOps !== 0 ? pct((revOps - totalExpenses + financeCost + depreciation) / revOps * 100) : '--'
+      ebit: cr(ebit),
+      result: revOps !== 0 ? pct(ebit / revOps * 100) : '--'
     },
     4: { // Operating Ratio
       totalExpenses: cr(totalExpenses), financeCost: cr(financeCost),
       depreciation: cr(depreciation),
-      opex: cr(totalExpenses - financeCost - depreciation),
+      opex: cr(opex),
       totalRevenue: cr(totalRevenue),
-      result: totalRevenue !== 0 ? pct((totalExpenses - financeCost - depreciation) / totalRevenue * 100) : '--'
+      result: totalRevenue !== 0 ? pct(opex / totalRevenue * 100) : '--'
     },
-    5: { // EBITDA
+    5: { // EBITDA Margin
       revOps: cr(revOps), totalExpenses: cr(totalExpenses),
       financeCost: cr(financeCost), depreciation: cr(depreciation),
-      ebitda: cr(revOps - totalExpenses + financeCost + depreciation + depreciation),
-      result: revOps !== 0 ? pct((revOps - totalExpenses + financeCost + depreciation + depreciation) / revOps * 100) : '--'
+      ebitda: cr(ebitda),
+      result: revOps !== 0 ? pct(ebitda / revOps * 100) : '--'
     },
     6: { // ROA
       netIncome: cr(netIncome), totalAssets: cr(totalAssets),
@@ -352,19 +361,22 @@ export const getKPIFormulaValues = async (month, year) => {
       invIncome: cr(invIncome), investments: cr(investments),
       result: investments !== 0 ? pct(invIncome / investments * 100) : '--'
     },
-    9: { accDep: '--', grossAssets: '--', result: '--' },
+    9: { // Depreciation Ratio
+      accDep: cr(accumDep), grossAssets: cr(grossBlock),
+      result: grossBlock !== 0 ? pct(accumDep / grossBlock * 100) : '--'
+    },
     10: { // CapEx Ratio
       capex: cr(capex), totalRevenue: cr(totalRevenue),
       result: totalRevenue !== 0 ? pct(capex / totalRevenue * 100) : '--'
     },
     11: { // Inventory Turnover
-      cogs: cr(cogs), inventory: cr(inventory),
-      result: inventory !== 0 ? `${(cogs / inventory).toFixed(2)}x` : '--'
+      cogs: cr(Math.abs(cogs)), inventory: cr(inventory),
+      result: inventory !== 0 ? `${(Math.abs(cogs) / inventory).toFixed(2)}x` : '--'
     },
     12: { // EPS
       totalRevenue: cr(totalRevenue), totalExpenses: cr(totalExpenses),
       netIncome: cr(netIncome),
-      shares: '9,33,25,411',
+      shares: '9,33,25,4110',
       result: `Rs ${(netIncome / shares).toFixed(2)}`
     },
     13: { // OCF
@@ -387,11 +399,11 @@ export const getKPIFormulaValues = async (month, year) => {
     },
     // Revenue card popups
     101: {
-      ...Object.fromEntries(REVENUE_OPS_GLS.map(gl => [`gl_${gl}`, cr(revGLValues[gl] || 0)])),
+      ...Object.fromEntries(Object.entries(revGLValues).map(([gl, v]) => [`gl_${gl}`, cr(v)])),
       result: cr(revOps)
     },
     102: {
-      ...Object.fromEntries(OTHER_INCOME_GLS.map(gl => [`gl_${gl}`, cr(otherGLValues[gl] || 0)])),
+      ...Object.fromEntries(Object.entries(otherGLValues).map(([gl, v]) => [`gl_${gl}`, cr(v)])),
       result: cr(otherIncome)
     },
     103: {
@@ -406,35 +418,4 @@ export const getKPIFormulaValues = async (month, year) => {
   };
 
   return formulaValues;
-};
-
-/* ─────────────────────────────────────────────
-   GET KPI DATA — from kpi_finance_transaction
-   ───────────────────────────────────────────── */
-export const getKPIData = async (month, year) => {
-  if (!month || !year) return [];
-
-  const [rows] = await db.execute(`
-    SELECT t.KPI_ID, t.KPI_VALUE
-    FROM kpi_finance_transaction t
-    WHERE t.KPI_MONTH = ? AND t.KPI_YEAR = ?
-    ORDER BY t.KPI_ID
-  `, [Number(month), Number(year)]);
-
-  return Array.from({ length: 16 }, (_, i) => {
-    const id = i + 1;
-    const meta = KPI_META[id];
-    const row = rows.find(r => r.KPI_ID === id);
-    const rawVal = row && row.KPI_VALUE !== null ? Number(row.KPI_VALUE) : null;
-    const value = rawVal !== null && !isNaN(rawVal) ? rawVal : null;
-    return {
-      id,
-      name: meta.name,
-      category: meta.category,
-      value,
-      unit: meta.unit,
-      target: meta.target,
-      status: value !== null ? 'active' : 'pending'
-    };
-  });
 };

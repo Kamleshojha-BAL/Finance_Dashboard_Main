@@ -9,7 +9,7 @@ const Footer = ({ page }) => {
 
     const fetchHits = async () => {
       try {
-        const res = await axios.get(`http://localhost:5000/api/hits/${page}`);
+        const res = await axios.get(`http://${window.location.hostname}:8800/api/hits/${page}`);
         setHits(res.data.hits);
       } catch (err) {
         console.error("Hit counter error:", err);

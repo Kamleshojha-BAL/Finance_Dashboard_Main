@@ -6,7 +6,7 @@ import RevenueMixChart from "../components/charts/RevenueMixChart";
 import KPIStatusTable from "../components/overview/KPIStatusTable";
 import KPIDetailModal from "../components/overview/KPIDetailModal";
 
-const API = "http://localhost:5000/api/finance";
+const API = `http://${window.location.hostname}:8800/api/finance`;
 const MONTH_NAMES = ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
 const ExecutiveOverview = ({ month, year }) => {

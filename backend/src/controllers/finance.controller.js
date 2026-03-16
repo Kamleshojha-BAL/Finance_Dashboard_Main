@@ -3,11 +3,11 @@ import { generateAIInsights, detectFinanceAlerts } from "../services/ai.service.
 
 export const refreshDashboard = async (req, res) => {
   try {
-    const { month, year, empId } = req.body;
+    const { month, year } = req.body;
     if (!month || !year) {
       return res.status(400).json({ error: "month and year are required" });
     }
-    const result = await sapService.refreshKPI(month, year, empId);
+    const result = await sapService.refreshKPI(month, year);
     const kpis = await sapService.getKPIData(month, year);
     res.json({ status: "success", data: { ...result, kpis } });
   } catch (error) {
@@ -36,7 +36,8 @@ export const getPLTrend = async (req, res) => {
 
 export const getCostStructure = async (req, res) => {
   try {
-    const data = await sapService.getCostStructure();
+    const { month, year } = req.query;
+    const data = await sapService.getCostStructure(month, year);
     res.json(data);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -47,15 +48,6 @@ export const getRevenueMix = async (req, res) => {
   try {
     const { month, year } = req.query;
     const data = await sapService.getRevenueMix(month, year);
-    res.json(data);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-};
-
-export const getDailyTrend = async (req, res) => {
-  try {
-    const data = await sapService.getDailyRevenueTrend();
     res.json(data);
   } catch (error) {
     res.status(500).json({ error: error.message });

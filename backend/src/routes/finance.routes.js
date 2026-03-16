@@ -6,7 +6,6 @@ import {
   getPLTrend,
   getCostStructure,
   getRevenueMix,
-  getDailyTrend,
   getKPIFormulaValues,
   getAIInsights,
   getAIAlerts
@@ -24,7 +23,6 @@ router.get("/dashboard", getFinanceDashboard);
 router.get("/pl-trend", getPLTrend);
 router.get("/cost-structure", getCostStructure);
 router.get("/revenue-mix", getRevenueMix);
-router.get("/daily-trend", getDailyTrend);
 
 /* KPI Formula Values */
 router.get("/kpi-formula-values", getKPIFormulaValues);
