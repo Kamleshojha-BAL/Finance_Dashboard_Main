@@ -5,11 +5,12 @@ import PLTrendChart from "../components/charts/PLTrendChart";
 import RevenueMixChart from "../components/charts/RevenueMixChart";
 import KPIStatusTable from "../components/overview/KPIStatusTable";
 import KPIDetailModal from "../components/overview/KPIDetailModal";
+import TrialBalanceSummary from "../components/overview/TrialBalanceSummary";
 
 const API = `http://${window.location.hostname}:8800/api/finance`;
 const MONTH_NAMES = ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
-const ExecutiveOverview = ({ month, year }) => {
+const ExecutiveOverview = ({ month, year, fyear, selectedPeriod }) => {
   const [dashboard, setDashboard] = useState(null);
   const [revenueMix, setRevenueMix] = useState([]);
   const [plTrend, setPLTrend] = useState([]);
@@ -20,7 +21,9 @@ const ExecutiveOverview = ({ month, year }) => {
 
   const fetchData = () => {
     setLoading(true);
-    const params = month && year ? `?month=${month}&year=${year}` : '';
+    let params = '';
+    if (month && year) params = `?month=${month}&year=${year}`;
+    else if (fyear) params = `?fyear=${fyear}`;
     Promise.all([
       axios.get(`${API}/dashboard${params}`),
       axios.get(`${API}/revenue-mix${params}`),
@@ -42,7 +45,7 @@ const ExecutiveOverview = ({ month, year }) => {
 
   useEffect(() => {
     fetchData();
-  }, [month, year]);
+  }, [month, year, fyear]);
 
   const handleRefresh = async () => {
     if (!month || !year) return;
@@ -74,13 +77,13 @@ const ExecutiveOverview = ({ month, year }) => {
     return <div className="alert alert-warning">Failed to load dashboard data.</div>;
   }
 
-  const { revenueSummary, revenueBreakdown, otherIncomeBreakdown, kpis } = dashboard;
-  const monthLabel = `${MONTH_NAMES[Number(month)]} ${year}`;
+  const { revenueSummary, expenseSummary, revenueBreakdown, otherIncomeBreakdown, kpis } = dashboard;
+  const monthLabel = fyear ? `FY ${fyear}-${String(Number(fyear) + 1).slice(-2)}` : `${MONTH_NAMES[Number(month)]} ${year}`;
 
   const topKpis = [
     {
       title: "REVENUE FROM OPERATIONS",
-      value: `${revenueSummary.revenueFromOps.crores} Cr`,
+      value: revenueSummary.revenueFromOps.display,
       subtitle: `${revenueBreakdown.length} GL accounts`,
       gradient: "linear-gradient(135deg, #667eea, #764ba2)",
       kpiId: 101,
@@ -88,7 +91,7 @@ const ExecutiveOverview = ({ month, year }) => {
     },
     {
       title: "OTHER INCOME",
-      value: `${revenueSummary.otherIncome.crores} Cr`,
+      value: revenueSummary.otherIncome.display,
       subtitle: `${otherIncomeBreakdown.length} GL accounts`,
       gradient: "linear-gradient(135deg, #f093fb, #f5576c)",
       kpiId: 102,
@@ -96,7 +99,7 @@ const ExecutiveOverview = ({ month, year }) => {
     },
     {
       title: "TOTAL REVENUE",
-      value: `${revenueSummary.totalRevenue.crores} Cr`,
+      value: revenueSummary.totalRevenue.display,
       subtitle: monthLabel,
       gradient: "linear-gradient(135deg, #4facfe, #00f2fe)",
       kpiId: 103,
@@ -105,12 +108,47 @@ const ExecutiveOverview = ({ month, year }) => {
     {
       title: "EXPORT REVENUE",
       value: `${revenueSummary.exportPct}%`,
-      subtitle: `${revenueSummary.exportRevenue.crores} Cr`,
+      subtitle: revenueSummary.exportRevenue.display,
       gradient: "linear-gradient(135deg, #43e97b, #38f9d7)",
       kpiId: 104,
       kpiValue: revenueSummary.exportPct
     }
   ];
+
+  const expenseCards = expenseSummary ? [
+    {
+      title: "TOTAL EXPENSES",
+      value: expenseSummary.totalExpenses.display,
+      subtitle: monthLabel,
+      gradient: "linear-gradient(135deg, #ff5858, #f09819)",
+      kpiId: 201,
+      kpiValue: expenseSummary.totalExpenses.crores
+    },
+    {
+      title: "COST OF MATERIALS",
+      value: (expenseSummary.comc || expenseSummary.cogs).display,
+      subtitle: `of ${revenueSummary.revenueFromOps.display} revenue`,
+      gradient: "linear-gradient(135deg, #e44d26, #f16529)",
+      kpiId: 202,
+      kpiValue: (expenseSummary.comc || expenseSummary.cogs).crores
+    },
+    {
+      title: "GROSS PROFIT",
+      value: expenseSummary.grossProfit.display,
+      subtitle: `Margin: ${expenseSummary.grossProfitPct}%`,
+      gradient: "linear-gradient(135deg, #11998e, #38ef7d)",
+      kpiId: 203,
+      kpiValue: expenseSummary.grossProfit.crores
+    },
+    {
+      title: "NET INCOME",
+      value: expenseSummary.netIncome.display,
+      subtitle: `Margin: ${expenseSummary.netIncomePct}%`,
+      gradient: "linear-gradient(135deg, #0575e6, #021b79)",
+      kpiId: 204,
+      kpiValue: expenseSummary.netIncome.crores
+    }
+  ] : [];
 
   const handleRevenueCardClick = (card) => {
     setSelectedKPI({
@@ -194,84 +232,48 @@ const ExecutiveOverview = ({ month, year }) => {
         ))}
       </div>
 
-      {/* 16 KPI STATUS TABLE */}
+      {/* EXPENSE KPI CARDS — clickable */}
+      {expenseCards.length > 0 && (
+        <div className="row g-3 mb-4">
+          {expenseCards.map((card, i) => (
+            <div key={i} className="col-md-3">
+              <div
+                className="card text-white border-0 shadow-sm h-100"
+                style={{
+                  background: card.gradient,
+                  cursor: "pointer",
+                  transition: "transform 0.15s"
+                }}
+                onClick={() => handleRevenueCardClick(card)}
+                onMouseEnter={e => e.currentTarget.style.transform = "translateY(-3px)"}
+                onMouseLeave={e => e.currentTarget.style.transform = "translateY(0)"}
+              >
+                <div className="card-body">
+                  <div style={{ fontSize: "11px", fontWeight: 600, opacity: 0.9, textTransform: "uppercase" }}>
+                    {card.title}
+                  </div>
+                  <div className="mt-2" style={{ fontSize: "28px", fontWeight: "bold" }}>
+                    {card.value}
+                  </div>
+                  <div style={{ fontSize: "12px", opacity: 0.8 }}>{card.subtitle}</div>
+                  <div className="mt-1" style={{ fontSize: "10px", opacity: 0.7 }}>
+                    Click for details
+                  </div>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* TRIAL BALANCE SUMMARY — matches Excel <GL> sheet */}
       <div className="mb-4">
-        <KPIStatusTable kpis={kpis} onKPIClick={handleKPIClick} />
-      </div>
-
-      {/* REVENUE BREAKDOWN + PIE CHART */}
-      <div className="row g-4 mb-4">
-        <div className="col-md-6">
-          <Card title="Revenue from Operations - Breakdown" badge="LIVE">
-            <table className="table table-sm table-hover mb-0" style={{ fontSize: "13px" }}>
-              <thead>
-                <tr>
-                  <th>Account</th>
-                  <th className="text-end">Amount (Cr)</th>
-                  <th className="text-end">%</th>
-                </tr>
-              </thead>
-              <tbody>
-                {revenueBreakdown.map((r, i) => (
-                  <tr key={i}>
-                    <td>{r.label}</td>
-                    <td className="text-end fw-bold">{r.crores.toFixed(2)}</td>
-                    <td className="text-end">
-                      {revenueSummary.revenueFromOps.value > 0
-                        ? ((r.amount / revenueSummary.revenueFromOps.value) * 100).toFixed(1)
-                        : 0}%
-                    </td>
-                  </tr>
-                ))}
-                <tr className="table-primary fw-bold">
-                  <td>Total</td>
-                  <td className="text-end">{revenueSummary.revenueFromOps.crores.toFixed(2)}</td>
-                  <td className="text-end">100%</td>
-                </tr>
-              </tbody>
-            </table>
-          </Card>
-        </div>
-
-        <div className="col-md-6">
-          <Card title="Revenue Mix by Product" badge="CHART">
-            <RevenueMixChart data={revenueMix} />
-          </Card>
-        </div>
-      </div>
-
-      {/* OTHER INCOME + TREND */}
-      <div className="row g-4 mb-4">
-        <div className="col-md-6">
-          <Card title="Other Income - Breakdown" badge="LIVE">
-            <table className="table table-sm table-hover mb-0" style={{ fontSize: "13px" }}>
-              <thead>
-                <tr>
-                  <th>Account</th>
-                  <th className="text-end">Amount (Cr)</th>
-                </tr>
-              </thead>
-              <tbody>
-                {otherIncomeBreakdown.map((r, i) => (
-                  <tr key={i}>
-                    <td>{r.label}</td>
-                    <td className="text-end fw-bold">{r.crores.toFixed(2)}</td>
-                  </tr>
-                ))}
-                <tr className="table-primary fw-bold">
-                  <td>Total Other Income</td>
-                  <td className="text-end">{revenueSummary.otherIncome.crores.toFixed(2)}</td>
-                </tr>
-              </tbody>
-            </table>
-          </Card>
-        </div>
-
-        <div className="col-md-6">
-          <Card title="Revenue Trend (Monthly)" badge="TREND">
-            <PLTrendChart data={plTrend} />
-          </Card>
-        </div>
+        <TrialBalanceSummary
+          month={month}
+          year={year}
+          fyear={fyear}
+          selectedPeriod={selectedPeriod}
+        />
       </div>
 
       {/* KPI DETAIL MODAL */}

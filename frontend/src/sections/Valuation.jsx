@@ -5,132 +5,186 @@ import KPIDetailModal from "../components/overview/KPIDetailModal";
 const API = `http://${window.location.hostname}:8800/api/finance`;
 const MONTH_NAMES = ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
-const SHARES = "9,33,25,411";
+// KPI definitions matching Excel "All" sheet (rows 5-20)
+const KPI_ROWS = [
+  { id: 1,  name: "Gross Profit Margin",              numLabel: "Gross Profit (GP)",                     denLabel: "Rev. from Operation",              unit: "%" },
+  { id: 2,  name: "Net Profit Margin",                numLabel: "Net Profit",                            denLabel: "Total Revenue",                    unit: "%" },
+  { id: 3,  name: "Operating Profit Margin (EBIT)",   numLabel: "Operating Income/EBIT",                 denLabel: "Revenue from Operation",           unit: "%" },
+  { id: 4,  name: "Operating Ratio",                  numLabel: "Operating Expenses",                    denLabel: "Total Revenue",                    unit: "%" },
+  { id: 5,  name: "EBITDA Margin",                    numLabel: "EBITDA",                                denLabel: "Revenue from Operation",           unit: "%" },
+  { id: 6,  name: "Return on Assets",                 numLabel: "Net Income",                            denLabel: "Total Assets",                     unit: "%" },
+  { id: 7,  name: "Return on Equity",                 numLabel: "Net Income",                            denLabel: "Shareholders' Equity",             unit: "%" },
+  { id: 8,  name: "Return on Investment",             numLabel: "Interest on Investment",                denLabel: "Int. bearing Investment",           unit: "%" },
+  { id: 9,  name: "Depreciation Ratio",               numLabel: "Accumulated Depreciation",              denLabel: "Total Assets",                     unit: "%" },
+  { id: 10, name: "CapEx Ratio",                      numLabel: "Capital Expenditures",                  denLabel: "Total Revenue",                    unit: "%" },
+  { id: 11, name: "Inventory Turnover Ratio (Times)", numLabel: "Cost of Goods Sold",                    denLabel: "Average Inventory",                unit: "x" },
+  { id: 12, name: "EPS (Rs.)",                        numLabel: "Net Income",                            denLabel: "Number of Outstanding Shares",     unit: "Rs" },
+  { id: 13, name: "Operating Cash Flow (Rs. in Crs)", numLabel: "Net Income+Dep+Changes in WC",         denLabel: "",                                 unit: "Cr" },
+  { id: 14, name: "Free Cash Flow (Rs. in Crs)",      numLabel: "Operating Cash Flow - Capital Expenditures", denLabel: "",                            unit: "Cr" },
+  { id: 15, name: "Cash Position Monitoring (Rs. in Crs)", numLabel: "Cash in Hand+Cash at Bank",        denLabel: "",                                 unit: "Cr" },
+  { id: 16, name: "Current Ratio (Times)",            numLabel: "Current Assets",                        denLabel: "Current Liabilities",              unit: "x" },
+];
 
-const Valuation = ({ month, year }) => {
-  const [eps, setEps] = useState(null);
-  const [revenue, setRevenue] = useState(null);
+// Category groupings for row coloring
+const CATEGORY_COLORS = {
+  1: "#f3e8ff", 2: "#f3e8ff", 3: "#f3e8ff", 4: "#f3e8ff", 5: "#f3e8ff",  // Profitability - purple tint
+  6: "#fff3cd", 7: "#fff3cd", 8: "#fff3cd",                                // Returns - yellow tint
+  9: "#d1ecf1", 10: "#d1ecf1",                                             // Asset Mgmt - cyan tint
+  11: "#d4edda",                                                            // Working Capital - green tint
+  12: "#fce4ec",                                                            // Valuation - pink tint
+  13: "#e8f5e9", 14: "#e8f5e9",                                             // Cash Flow - green tint
+  15: "#e3f2fd", 16: "#e3f2fd",                                             // Liquidity - blue tint
+};
+
+const formatIndian = (num) => {
+  if (num === null || num === undefined || isNaN(num)) return "--";
+  const absNum = Math.abs(num);
+  const sign = num < 0 ? "-" : "";
+
+  // Format in Indian numbering (xx,xx,xx,xxx)
+  const str = Math.round(absNum).toString();
+  if (str.length <= 3) return sign + str;
+
+  let lastThree = str.substring(str.length - 3);
+  let remaining = str.substring(0, str.length - 3);
+  if (remaining.length > 0) {
+    lastThree = "," + lastThree;
+  }
+  const formatted = remaining.replace(/\B(?=(\d{2})+(?!\d))/g, ",") + lastThree;
+  return sign + formatted;
+};
+
+const formatValue = (kpi, kpiDef) => {
+  if (!kpi || kpi.value === null || kpi.value === undefined) return "--";
+  if (kpiDef.unit === "%") return `${kpi.value.toFixed(2)}%`;
+  if (kpiDef.unit === "x") return kpi.value.toFixed(2);
+  if (kpiDef.unit === "Rs") return kpi.value.toFixed(2);
+  if (kpiDef.unit === "Cr") return kpi.value.toFixed(2);
+  return kpi.value.toFixed(2);
+};
+
+const Valuation = ({ month, year, fyear }) => {
+  const [kpis, setKpis] = useState([]);
   const [formulaValues, setFormulaValues] = useState({});
   const [loading, setLoading] = useState(true);
-  const [showModal, setShowModal] = useState(false);
+  const [selectedKPI, setSelectedKPI] = useState(null);
 
   useEffect(() => {
-    if (!month || !year) return;
+    if (!month && !fyear) return;
     setLoading(true);
-    const params = `?month=${month}&year=${year}`;
+    const params = month && year ? `?month=${month}&year=${year}` : `?fyear=${fyear}`;
     Promise.all([
       axios.get(`${API}/dashboard${params}`),
       axios.get(`${API}/kpi-formula-values${params}`)
     ])
       .then(([dashRes, formulaRes]) => {
-        const data = dashRes.data.data;
-        const epsKpi = (data.kpis || []).find(k => k.id === 12);
-        setEps(epsKpi || null);
-        setRevenue(data.revenueSummary || null);
+        setKpis(dashRes.data.data.kpis || []);
         setFormulaValues(formulaRes.data.data || {});
         setLoading(false);
       })
       .catch(() => setLoading(false));
-  }, [month, year]);
+  }, [month, year, fyear]);
 
   if (loading) {
     return (
       <div className="text-center p-5">
         <div className="spinner-border text-primary" role="status" />
-        <p className="mt-2 text-muted">Loading valuation data...</p>
+        <p className="mt-2 text-muted">Loading financial ratio data...</p>
       </div>
     );
   }
 
-  const monthLabel = `${MONTH_NAMES[Number(month)]} ${year}`;
+  const monthLabel = fyear && !month
+    ? `FY ${fyear}-${String(Number(fyear) + 1).slice(-2)}`
+    : `${MONTH_NAMES[Number(month)]} ${year}`;
+
+  const handleClick = (kpi) => {
+    if (kpi) {
+      setSelectedKPI({ ...kpi, formulaValues: formulaValues[kpi.id] });
+    }
+  };
 
   return (
     <div>
-      <h5 className="fw-bold mb-1">Valuation - {monthLabel}</h5>
-      <p className="text-muted mb-4" style={{ fontSize: "12px" }}>Click on the EPS card to view formula, calculated values & GL details</p>
-
-      <div className="row g-4 mb-4">
-        {/* EPS Card */}
-        <div className="col-md-4">
-          <div
-            className="card shadow-sm h-100 border-0"
-            style={{ cursor: "pointer", transition: "transform 0.15s" }}
-            onClick={() => setShowModal(true)}
-            onMouseEnter={e => e.currentTarget.style.transform = "translateY(-3px)"}
-            onMouseLeave={e => e.currentTarget.style.transform = "translateY(0)"}
-          >
-            <div className="card-body text-center p-4">
-              <div style={{ fontSize: "36px" }}>💎</div>
-              <div className="fw-bold mt-2" style={{ fontSize: "14px" }}>
-                Earnings Per Share (EPS)
-              </div>
-              <div className="mt-3" style={{
-                fontSize: "48px", fontWeight: "bold",
-                color: eps && eps.value !== null ? (eps.value >= 0 ? '#198754' : '#dc3545') : '#6c757d'
-              }}>
-                {eps && eps.value !== null ? `Rs ${eps.value.toFixed(2)}` : "--"}
-              </div>
-              <div className="mt-2">
-                <span className="badge bg-primary" style={{ fontSize: "11px" }}>
-                  Target: Growth YoY
-                </span>
-              </div>
-              <div className="text-muted mt-2" style={{ fontSize: "12px" }}>
-                Net Income / Outstanding Shares
-              </div>
-              <div className="mt-2">
-                {eps && eps.status === 'active'
-                  ? <span className="badge bg-success">Active</span>
-                  : <span className="badge bg-warning text-dark">Awaiting Data</span>
-                }
-              </div>
-            </div>
-          </div>
+      <div className="d-flex justify-content-between align-items-center mb-3">
+        <div>
+          <h5 className="fw-bold mb-0">Financial Ratio Analysis</h5>
+          <small className="text-muted">All 16 KPIs with Numerator, Denominator & Calculated Values</small>
         </div>
+        <span className="badge bg-secondary" style={{ fontSize: "12px" }}>{monthLabel}</span>
+      </div>
 
-        {/* Shares Info */}
-        <div className="col-md-4">
-          <div className="card shadow-sm h-100 border-0">
-            <div className="card-body text-center p-4">
-              <div style={{ fontSize: "36px" }}>📊</div>
-              <div className="fw-bold mt-2" style={{ fontSize: "14px" }}>
-                Outstanding Shares
-              </div>
-              <div className="mt-3" style={{ fontSize: "36px", fontWeight: "bold", color: "#0d6efd" }}>
-                {SHARES}
-              </div>
-              <div className="text-muted mt-2" style={{ fontSize: "12px" }}>
-                Fixed count used for EPS calculation
-              </div>
-            </div>
-          </div>
-        </div>
+      <div className="card shadow-sm border-0">
+        <div className="card-body p-0">
+          <div className="table-responsive">
+            <table className="table table-hover table-bordered mb-0" style={{ fontSize: "13px" }}>
+              <thead>
+                <tr style={{ backgroundColor: "#2c3e50", color: "#fff" }}>
+                  <th style={{ width: "30px", textAlign: "center", padding: "10px 8px" }}>#</th>
+                  <th style={{ padding: "10px 12px" }}>Parameter</th>
+                  <th style={{ padding: "10px 12px" }}>Numerator</th>
+                  <th style={{ padding: "10px 12px" }}>Denominator</th>
+                  <th className="text-end" style={{ padding: "10px 12px", width: "150px" }}>Numerator Value</th>
+                  <th className="text-end" style={{ padding: "10px 12px", width: "150px" }}>Denominator Value</th>
+                  <th className="text-end" style={{ padding: "10px 12px", width: "100px", fontWeight: "bold" }}>{monthLabel}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {KPI_ROWS.map((def, idx) => {
+                  const kpi = kpis.find(k => k.id === def.id);
+                  const bgColor = CATEGORY_COLORS[def.id] || "#fff";
+                  const hasData = kpi && kpi.value !== null;
 
-        {/* Revenue Context */}
-        <div className="col-md-4">
-          <div className="card shadow-sm h-100 border-0">
-            <div className="card-body text-center p-4">
-              <div style={{ fontSize: "36px" }}>💹</div>
-              <div className="fw-bold mt-2" style={{ fontSize: "14px" }}>
-                Total Revenue
-              </div>
-              <div className="mt-3" style={{ fontSize: "36px", fontWeight: "bold", color: "#198754" }}>
-                {revenue ? `${revenue.totalRevenue.crores} Cr` : "--"}
-              </div>
-              <div className="text-muted mt-2" style={{ fontSize: "12px" }}>
-                Revenue from Ops + Other Income
-              </div>
-            </div>
+                  return (
+                    <tr
+                      key={def.id}
+                      style={{
+                        backgroundColor: bgColor,
+                        cursor: "pointer",
+                        transition: "background-color 0.15s"
+                      }}
+                      onClick={() => handleClick(kpi)}
+                      onMouseEnter={e => e.currentTarget.style.backgroundColor = "#e2e6ea"}
+                      onMouseLeave={e => e.currentTarget.style.backgroundColor = bgColor}
+                    >
+                      <td className="text-center" style={{ fontWeight: "bold", color: "#6c757d" }}>
+                        {idx + 1}
+                      </td>
+                      <td style={{ fontWeight: "600" }}>{def.name}</td>
+                      <td className="text-muted">{def.numLabel}</td>
+                      <td className="text-muted">{def.denLabel || "--"}</td>
+                      <td className="text-end" style={{ fontFamily: "monospace", fontWeight: "600" }}>
+                        {kpi && kpi.numerator !== null ? formatIndian(kpi.numerator) : "--"}
+                      </td>
+                      <td className="text-end" style={{ fontFamily: "monospace", fontWeight: "600" }}>
+                        {kpi && kpi.denominator !== null ? formatIndian(kpi.denominator) : "--"}
+                      </td>
+                      <td className="text-end" style={{
+                        fontWeight: "bold",
+                        fontSize: "14px",
+                        color: hasData ? "#0d6efd" : "#6c757d"
+                      }}>
+                        {hasData ? formatValue(kpi, def) : "--"}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         </div>
       </div>
 
-      {showModal && eps && (
+      <div className="mt-2 text-muted" style={{ fontSize: "11px" }}>
+        Click any row to view detailed formula breakdown & GL accounts
+      </div>
+
+      {selectedKPI && (
         <KPIDetailModal
-          kpiId={12}
-          kpiValue={eps.value}
-          formulaValues={formulaValues[12]}
-          onClose={() => setShowModal(false)}
+          kpiId={selectedKPI.id}
+          kpiValue={selectedKPI.value}
+          formulaValues={selectedKPI.formulaValues}
+          onClose={() => setSelectedKPI(null)}
         />
       )}
     </div>
