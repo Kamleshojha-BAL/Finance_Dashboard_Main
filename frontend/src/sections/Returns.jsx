@@ -13,16 +13,16 @@ const KPI_INFO = {
   8: { label: "Return on Investment (ROI)", icon: "💰", color: "#198754", desc: "Investment Income / Total Investments" }
 };
 
-const Returns = ({ month, year }) => {
+const Returns = ({ month, year, fyear }) => {
   const [kpis, setKpis] = useState([]);
   const [formulaValues, setFormulaValues] = useState({});
   const [loading, setLoading] = useState(true);
   const [selectedKPI, setSelectedKPI] = useState(null);
 
   useEffect(() => {
-    if (!month || !year) return;
+    if (!month && !fyear) return;
     setLoading(true);
-    const params = `?month=${month}&year=${year}`;
+    const params = month && year ? `?month=${month}&year=${year}` : `?fyear=${fyear}`;
     Promise.all([
       axios.get(`${API}/dashboard${params}`),
       axios.get(`${API}/kpi-formula-values${params}`)
@@ -34,7 +34,7 @@ const Returns = ({ month, year }) => {
         setLoading(false);
       })
       .catch(() => setLoading(false));
-  }, [month, year]);
+  }, [month, year, fyear]);
 
   if (loading) {
     return (

@@ -1,42 +1,26 @@
 import { useEffect, useState } from "react";
 import axios from "axios";
-import KPIDetailModal from "../components/overview/KPIDetailModal";
 
 const API = `http://${window.location.hostname}:8800/api/finance`;
 const MONTH_NAMES = ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
-const KPI_IDS = [1, 2, 3, 5, 4]; // GP, NP, EBIT, EBITDA, Operating Ratio
+const fmtCr = (v) => v !== null && v !== undefined ? `${v.toFixed(2)} Cr` : "--";
+const fmt = (v) => v !== null && v !== undefined ? v.toFixed(2) : "--";
 
-const KPI_INFO = {
-  1: { label: "Gross Profit Margin", icon: "📊", color: "#6f42c1", desc: "(Revenue - COGS) / Revenue" },
-  2: { label: "Net Profit Margin", icon: "📈", color: "#0d6efd", desc: "(Total Revenue - Total Expenses) / Revenue" },
-  3: { label: "EBIT Margin", icon: "💹", color: "#198754", desc: "Earnings Before Interest & Tax / Revenue" },
-  5: { label: "EBITDA Margin", icon: "🏭", color: "#0dcaf0", desc: "EBIT + Depreciation / Revenue" },
-  4: { label: "Operating Ratio", icon: "⚙️", color: "#e85d04", desc: "Operating Expenses / Revenue" }
-};
-
-const Profitability = ({ month, year }) => {
-  const [kpis, setKpis] = useState([]);
-  const [formulaValues, setFormulaValues] = useState({});
+const Profitability = ({ month, year, fyear }) => {
+  const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [selectedKPI, setSelectedKPI] = useState(null);
+  const [expandFactory, setExpandFactory] = useState(false);
+  const [expandMfgGroups, setExpandMfgGroups] = useState({});
 
   useEffect(() => {
-    if (!month || !year) return;
+    if (!month && !fyear) return;
     setLoading(true);
-    const params = `?month=${month}&year=${year}`;
-    Promise.all([
-      axios.get(`${API}/dashboard${params}`),
-      axios.get(`${API}/kpi-formula-values${params}`)
-    ])
-      .then(([dashRes, formulaRes]) => {
-        const all = dashRes.data.data.kpis || [];
-        setKpis(all.filter(k => KPI_IDS.includes(k.id)));
-        setFormulaValues(formulaRes.data.data || {});
-        setLoading(false);
-      })
+    const params = month && year ? `?month=${month}&year=${year}` : `?fyear=${fyear}`;
+    axios.get(`${API}/profitability-breakdown${params}`)
+      .then(res => { setData(res.data.data); setLoading(false); })
       .catch(() => setLoading(false));
-  }, [month, year]);
+  }, [month, year, fyear]);
 
   if (loading) {
     return (
@@ -47,109 +31,256 @@ const Profitability = ({ month, year }) => {
     );
   }
 
-  const monthLabel = `${MONTH_NAMES[Number(month)]} ${year}`;
+  if (!data) return <div className="alert alert-warning">No profitability data available.</div>;
 
-  const handleClick = (kpi) => {
-    setSelectedKPI({ ...kpi, formulaValues: formulaValues[kpi.id] });
+  const monthLabel = fyear && !month
+    ? `FY ${fyear}-${String(Number(fyear) + 1).slice(-2)}`
+    : `${MONTH_NAMES[Number(month)]} ${year}`;
+
+  const { gpMargin, npMargin, ebit, ebitda } = data;
+
+  const toggleMfgGroup = (label) => {
+    setExpandMfgGroups(prev => ({ ...prev, [label]: !prev[label] }));
   };
+
+  // Shared styles
+  const headerStyle = (color) => ({
+    background: color,
+    color: "#fff",
+    padding: "16px 20px",
+    borderRadius: "8px 8px 0 0",
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center"
+  });
+
+  const Row = ({ label, value, bold, highlight, indent = 0, onClick, expandable, expanded }) => (
+    <tr
+      style={{
+        fontWeight: bold ? "bold" : "normal",
+        backgroundColor: highlight ? "#e8f4fd" : "transparent",
+        borderTop: highlight ? "2px solid #0d6efd" : undefined,
+        cursor: onClick ? "pointer" : "default"
+      }}
+      onClick={onClick}
+    >
+      <td style={{ paddingLeft: `${16 + indent * 24}px`, fontSize: indent >= 2 ? "12px" : "13px" }}>
+        {expandable && (
+          <span style={{ marginRight: "6px", fontSize: "10px", color: "#6c757d" }}>
+            {expanded ? "▼" : "▶"}
+          </span>
+        )}
+        {indent > 0 && !expandable && <span style={{ color: "#adb5bd", marginRight: "4px" }}>└</span>}
+        {label}
+      </td>
+      <td className="text-end" style={{
+        fontWeight: bold ? "bold" : "600",
+        color: highlight ? "#0d6efd" : "#212529",
+        fontFamily: "monospace",
+        fontSize: bold ? "14px" : "13px"
+      }}>
+        {value}
+      </td>
+    </tr>
+  );
 
   return (
     <div>
       <h5 className="fw-bold mb-1">Profitability Analysis - {monthLabel}</h5>
-      <p className="text-muted mb-4" style={{ fontSize: "12px" }}>Click on any card to view formula, calculated values & GL details</p>
+      <p className="text-muted mb-4" style={{ fontSize: "12px" }}>
+        Detailed breakdown matching Excel GP Margin, NP Margin, EBIT & EBITDA sheets
+      </p>
 
-      <div className="row g-3 mb-4">
-        {KPI_IDS.map(id => {
-          const kpi = kpis.find(k => k.id === id);
-          const info = KPI_INFO[id];
-          if (!kpi) return null;
-          return (
-            <div key={id} className="col-md-4 col-lg">
-              <div
-                className="card shadow-sm h-100 border-0"
-                style={{ cursor: "pointer", transition: "transform 0.15s" }}
-                onClick={() => handleClick(kpi)}
-                onMouseEnter={e => e.currentTarget.style.transform = "translateY(-3px)"}
-                onMouseLeave={e => e.currentTarget.style.transform = "translateY(0)"}
-              >
-                <div className="card-body text-center">
-                  <div style={{ fontSize: "28px" }}>{info.icon}</div>
-                  <div className="text-muted mt-1" style={{ fontSize: "12px", fontWeight: 600 }}>
-                    {info.label}
-                  </div>
-                  <div className="mt-2" style={{ fontSize: "32px", fontWeight: "bold", color: info.color }}>
-                    {kpi.value !== null ? `${kpi.value.toFixed(2)}%` : "--"}
-                  </div>
-                  <div className="mt-1">
-                    <span className="badge" style={{ background: info.color, fontSize: "11px" }}>
-                      Target: {kpi.target}
-                    </span>
-                  </div>
-                  <div className="text-muted mt-2" style={{ fontSize: "11px" }}>
-                    {info.desc}
-                  </div>
-                  <div className="mt-2">
-                    {kpi.status === 'active'
-                      ? <span className="badge bg-success">Active</span>
-                      : <span className="badge bg-warning text-dark">Awaiting Data</span>
-                    }
-                  </div>
-                </div>
+      <div className="row g-4">
+        {/* ── GP MARGIN ── */}
+        <div className="col-lg-6">
+          <div className="card shadow-sm border-0 mb-4">
+            <div style={headerStyle("linear-gradient(135deg, #6f42c1, #9b59b6)")}>
+              <div>
+                <div style={{ fontSize: "13px", opacity: 0.9 }}>Gross Profit Margin</div>
+                <div style={{ fontSize: "28px", fontWeight: "bold" }}>{fmt(gpMargin.margin)}%</div>
+              </div>
+              <div style={{ textAlign: "right", fontSize: "12px", opacity: 0.8 }}>
+                <div>GP: {fmtCr(gpMargin.grossProfit)}</div>
+                <div>Revenue: {fmtCr(gpMargin.revOps)}</div>
               </div>
             </div>
-          );
-        })}
-      </div>
-
-      {/* Summary Table */}
-      <div className="card shadow-sm border-0">
-        <div className="card-body">
-          <h6 className="fw-bold mb-3">Profitability Summary</h6>
-          <table className="table table-sm table-hover mb-0" style={{ fontSize: "13px" }}>
-            <thead className="table-light">
-              <tr>
-                <th>KPI</th>
-                <th className="text-center">Value</th>
-                <th className="text-center">Target</th>
-                <th className="text-center">Status</th>
-                <th>Formula</th>
-              </tr>
-            </thead>
-            <tbody>
-              {KPI_IDS.map(id => {
-                const kpi = kpis.find(k => k.id === id);
-                const info = KPI_INFO[id];
-                if (!kpi) return null;
-                return (
-                  <tr key={id} style={{ cursor: "pointer" }} onClick={() => handleClick(kpi)}>
-                    <td className="fw-bold">{info.label}</td>
-                    <td className="text-center fw-bold" style={{ color: info.color }}>
-                      {kpi.value !== null ? `${kpi.value.toFixed(2)}%` : "--"}
-                    </td>
-                    <td className="text-center">{kpi.target}</td>
-                    <td className="text-center">
-                      {kpi.status === 'active'
-                        ? <span className="badge bg-success">Active</span>
-                        : <span className="badge bg-warning text-dark">Awaiting</span>
-                      }
-                    </td>
-                    <td className="text-muted" style={{ fontSize: "11px" }}>{info.desc}</td>
+            <div className="card-body p-0">
+              <table className="table table-hover mb-0" style={{ fontSize: "13px" }}>
+                <thead className="table-light">
+                  <tr>
+                    <th style={{ paddingLeft: "16px" }}>Particulars</th>
+                    <th className="text-end" style={{ width: "140px" }}>Amount</th>
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                </thead>
+                <tbody>
+                  <Row label="Revenue from Operations" value={fmtCr(gpMargin.revOps)} bold />
+                  <Row label="COGS (Cost of Goods Sold)" value={fmtCr(gpMargin.cogs.total)} bold indent={0} />
+                  <Row label="Cost of Raw Materials Consumed" value={fmtCr(gpMargin.cogs.comc)} indent={1} />
+                  <Row label="(Increase)/Decrease in Inventories" value={fmtCr(gpMargin.cogs.changesInInv)} indent={1} />
+
+                  {/* Factory Employee - expandable */}
+                  <Row
+                    label={`Employee Cost - Factory Portion`}
+                    value={fmtCr(gpMargin.cogs.factoryEmployee.total)}
+                    indent={1}
+                    expandable
+                    expanded={expandFactory}
+                    onClick={() => setExpandFactory(!expandFactory)}
+                  />
+                  {expandFactory && gpMargin.cogs.factoryEmployee.glRows.map((gl, i) => (
+                    <tr key={i} style={{ fontSize: "12px", backgroundColor: "#f8f9fa" }}>
+                      <td style={{ paddingLeft: "72px" }}>
+                        <span className="font-monospace text-muted" style={{ fontSize: "11px" }}>{gl.glno}</span>
+                        {" "}{gl.desc}
+                      </td>
+                      <td className="text-end" style={{ fontFamily: "monospace", fontSize: "12px" }}>{fmtCr(gl.crores)}</td>
+                    </tr>
+                  ))}
+                  {expandFactory && gpMargin.cogs.factoryEmployee.contributions.map((c, i) => (
+                    <tr key={`pf-${i}`} style={{ fontSize: "12px", backgroundColor: "#f0f7ff" }}>
+                      <td style={{ paddingLeft: "72px" }}>
+                        <span className="badge bg-info text-dark" style={{ fontSize: "10px", marginRight: "6px" }}>{c.glno}</span>
+                        {c.desc}
+                      </td>
+                      <td className="text-end" style={{ fontFamily: "monospace", fontSize: "12px" }}>{fmtCr(c.crores)}</td>
+                    </tr>
+                  ))}
+
+                  <Row label="Power" value={fmtCr(gpMargin.cogs.power)} indent={1} />
+
+                  {/* Manufacturing Other Exp sub-groups */}
+                  {gpMargin.cogs.mfgOtherExp.groups.map((group, i) => (
+                    <tr key={`mfg-${i}`}>
+                      <td
+                        style={{ paddingLeft: "40px", cursor: "pointer", fontSize: "13px" }}
+                        onClick={() => toggleMfgGroup(group.label)}
+                      >
+                        <span style={{ marginRight: "6px", fontSize: "10px", color: "#6c757d" }}>
+                          {expandMfgGroups[group.label] ? "▼" : "▶"}
+                        </span>
+                        {group.label.replace('Other Exp-', '')}
+                      </td>
+                      <td className="text-end" style={{ fontFamily: "monospace", fontWeight: "600" }}>
+                        {fmtCr(group.crores)}
+                      </td>
+                    </tr>
+                  ))}
+
+                  {/* Expanded GL rows for each mfg group */}
+                  {gpMargin.cogs.mfgOtherExp.groups.map((group) =>
+                    expandMfgGroups[group.label] && group.gls.map((gl, j) => (
+                      <tr key={`${group.label}-${j}`} style={{ fontSize: "11px", backgroundColor: "#f8f9fa" }}>
+                        <td style={{ paddingLeft: "72px" }}>
+                          <span className="font-monospace text-muted" style={{ fontSize: "10px" }}>{gl.glno}</span>
+                          {" "}{gl.desc}
+                        </td>
+                        <td className="text-end" style={{ fontFamily: "monospace", fontSize: "11px" }}>{fmtCr(gl.crores)}</td>
+                      </tr>
+                    ))
+                  )}
+
+                  <Row label="Gross Profit" value={fmtCr(gpMargin.grossProfit)} bold highlight />
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        {/* ── NP MARGIN ── */}
+        <div className="col-lg-6">
+          <div className="card shadow-sm border-0 mb-4">
+            <div style={headerStyle("linear-gradient(135deg, #0d6efd, #6610f2)")}>
+              <div>
+                <div style={{ fontSize: "13px", opacity: 0.9 }}>Net Profit Margin</div>
+                <div style={{ fontSize: "28px", fontWeight: "bold" }}>{fmt(npMargin.margin)}%</div>
+              </div>
+              <div style={{ textAlign: "right", fontSize: "12px", opacity: 0.8 }}>
+                <div>NP: {fmtCr(npMargin.netProfit)}</div>
+                <div>Revenue: {fmtCr(npMargin.totalRevenue)}</div>
+              </div>
+            </div>
+            <div className="card-body p-0">
+              <table className="table table-hover mb-0" style={{ fontSize: "13px" }}>
+                <thead className="table-light">
+                  <tr>
+                    <th style={{ paddingLeft: "16px" }}>Particulars</th>
+                    <th className="text-end" style={{ width: "140px" }}>Amount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <Row label="Total Revenue" value={fmtCr(npMargin.totalRevenue)} bold />
+                  {npMargin.expenses.map((exp, i) => (
+                    <Row key={i} label={exp.label} value={fmtCr(exp.crores)} indent={1} />
+                  ))}
+                  <Row label="Total Expenses" value={fmtCr(npMargin.totalExpenses)} bold indent={0} />
+                  <Row label="Net Profit" value={fmtCr(npMargin.netProfit)} bold highlight />
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        {/* ── EBIT ── */}
+        <div className="col-lg-6">
+          <div className="card shadow-sm border-0 mb-4">
+            <div style={headerStyle("linear-gradient(135deg, #198754, #20c997)")}>
+              <div>
+                <div style={{ fontSize: "13px", opacity: 0.9 }}>Operating Profit (EBIT)</div>
+                <div style={{ fontSize: "28px", fontWeight: "bold" }}>{fmt(ebit.margin)}%</div>
+              </div>
+              <div style={{ textAlign: "right", fontSize: "12px", opacity: 0.8 }}>
+                <div>EBIT: {fmtCr(ebit.ebit)}</div>
+              </div>
+            </div>
+            <div className="card-body p-0">
+              <table className="table table-hover mb-0" style={{ fontSize: "13px" }}>
+                <thead className="table-light">
+                  <tr>
+                    <th style={{ paddingLeft: "16px" }}>Particulars</th>
+                    <th className="text-end" style={{ width: "140px" }}>Amount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <Row label="Revenue from Operations" value={fmtCr(ebit.revOps)} bold />
+                  <Row label="Operating Expenses (excl. Interest)" value={fmtCr(ebit.opExExclInterest)} indent={1} />
+                  <Row label="Operating Income / EBIT" value={fmtCr(ebit.ebit)} bold highlight />
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        {/* ── EBITDA ── */}
+        <div className="col-lg-6">
+          <div className="card shadow-sm border-0 mb-4">
+            <div style={headerStyle("linear-gradient(135deg, #0dcaf0, #6f42c1)")}>
+              <div>
+                <div style={{ fontSize: "13px", opacity: 0.9 }}>EBITDA Margin</div>
+                <div style={{ fontSize: "28px", fontWeight: "bold" }}>{fmt(ebitda.margin)}%</div>
+              </div>
+              <div style={{ textAlign: "right", fontSize: "12px", opacity: 0.8 }}>
+                <div>EBITDA: {fmtCr(ebitda.ebitda)}</div>
+              </div>
+            </div>
+            <div className="card-body p-0">
+              <table className="table table-hover mb-0" style={{ fontSize: "13px" }}>
+                <thead className="table-light">
+                  <tr>
+                    <th style={{ paddingLeft: "16px" }}>Particulars</th>
+                    <th className="text-end" style={{ width: "140px" }}>Amount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <Row label="Revenue from Operations" value={fmtCr(ebitda.revOps)} bold />
+                  <Row label="Operating Expenses (excl. Interest & Dep.)" value={fmtCr(ebitda.opExExclIntDep)} indent={1} />
+                  <Row label="EBITDA" value={fmtCr(ebitda.ebitda)} bold highlight />
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
       </div>
-
-      {selectedKPI && (
-        <KPIDetailModal
-          kpiId={selectedKPI.id}
-          kpiValue={selectedKPI.value}
-          formulaValues={selectedKPI.formulaValues}
-          onClose={() => setSelectedKPI(null)}
-        />
-      )}
     </div>
   );
 };

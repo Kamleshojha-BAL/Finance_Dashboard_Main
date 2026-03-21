@@ -8,7 +8,10 @@ import {
   getRevenueMix,
   getKPIFormulaValues,
   getAIInsights,
-  getAIAlerts
+  getAIAlerts,
+  getProfitabilityBreakdown,
+  getTrialBalanceSummary,
+  getFiscalYears
 } from "../controllers/finance.controller.js";
 
 const router = express.Router();
@@ -30,5 +33,14 @@ router.get("/kpi-formula-values", getKPIFormulaValues);
 /* AI */
 router.get("/ai-insights", getAIInsights);
 router.get("/ai-alerts", getAIAlerts);
+
+/* Profitability Breakdown */
+router.get("/profitability-breakdown", getProfitabilityBreakdown);
+
+/* Trial Balance Summary */
+router.get("/trial-balance", getTrialBalanceSummary);
+
+/* Fiscal Years */
+router.get("/fiscal-years", getFiscalYears);
 
 export default router;

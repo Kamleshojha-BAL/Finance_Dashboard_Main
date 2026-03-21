@@ -5,11 +5,17 @@ const KPI_DETAILS = {
     formula: "(Revenue from Operations - COGS) / Revenue from Operations x 100",
     formulaTerms: [
       { label: "Revenue from Operations", key: "revOps" },
-      { label: "COGS", key: "cogs" },
+      { label: "COGS - Raw Materials", key: "cogsBreakdown.comc", indent: true },
+      { label: "COGS - Changes in Inventory", key: "cogsBreakdown.changesInInv", indent: true },
+      { label: "COGS - Power", key: "cogsBreakdown.power", indent: true },
+      { label: "COGS - Factory Employee Cost", key: "cogsBreakdown.factoryEmployee", indent: true },
+      { label: "COGS - Mfg Other Expenses", key: "cogsBreakdown.mfgOtherExp", indent: true },
+      { label: "Total COGS", key: "cogs", derived: true },
       { label: "Gross Profit", key: "grossProfit", derived: true },
       { label: "GP Margin", key: "result", derived: true }
     ],
-    description: "Measures the percentage of revenue retained after deducting the direct cost of goods sold. A higher GP margin indicates better cost control in production.",
+    hasCOGSBreakdown: true,
+    description: "Measures the percentage of revenue retained after deducting manufacturing costs (COGS). COGS includes raw materials, inventory changes, power, factory employee cost, and manufacturing overheads (stores, contract labour, packing, rent, R&M).",
     glAccounts: [
       { group: "Revenue from Operations", gls: [
         { code: "0060101010", name: "Dom Sale FeCr" },
@@ -482,13 +488,91 @@ const KPI_DETAILS = {
     ],
     unit: "%",
     target: ">50%"
+  },
+  // Expense card popups (IDs 201-204)
+  201: {
+    name: "Total Expenses",
+    section: "Expenses",
+    formula: "Sum of all Expense GL accounts (7-series)",
+    formulaTerms: [
+      { label: "Total Expenses", key: "result", derived: true }
+    ],
+    hasGLBreakdown: true,
+    description: "Total of all operating and non-operating expenses including materials, employee costs, power, depreciation, finance cost, and taxes.",
+    glAccounts: [],
+    unit: "Rs Cr",
+    target: "Monitor"
+  },
+  202: {
+    name: "Cost of Materials",
+    section: "Expenses",
+    formula: "Cost of Material Consumed GL accounts",
+    formulaTerms: [
+      { label: "Revenue from Operations", key: "revOps" },
+      { label: "COGS as % of Revenue", key: "cogsPct", derived: true },
+      { label: "Total COGS", key: "result", derived: true }
+    ],
+    hasGLBreakdown: true,
+    description: "Direct cost of raw materials consumed in production. This is the largest expense component and directly impacts gross profit margin.",
+    glAccounts: [],
+    unit: "Rs Cr",
+    target: "Monitor"
+  },
+  203: {
+    name: "Gross Profit",
+    section: "Profitability",
+    formula: "Revenue from Operations - COGS (Excel methodology)",
+    formulaTerms: [
+      { label: "Revenue from Operations", key: "revOps" },
+      { label: "COGS - Raw Materials", key: "cogsBreakdown.comc", indent: true },
+      { label: "COGS - Changes in Inventory", key: "cogsBreakdown.changesInInv", indent: true },
+      { label: "COGS - Power", key: "cogsBreakdown.power", indent: true },
+      { label: "COGS - Factory Employee Cost", key: "cogsBreakdown.factoryEmployee", indent: true },
+      { label: "COGS - Mfg Other Expenses", key: "cogsBreakdown.mfgOtherExp", indent: true },
+      { label: "Total COGS", key: "cogs", derived: true },
+      { label: "Gross Profit", key: "grossProfit", derived: true },
+      { label: "GP Margin", key: "result", derived: true }
+    ],
+    description: "Revenue remaining after deducting full COGS (raw materials, inventory changes, power, factory employee costs, and manufacturing overheads). Matches Excel GP Margin methodology.",
+    glAccounts: [
+      { group: "Revenue from Operations", gls: [
+        { code: "60101xxx-60105xxx", name: "All operational revenue GLs" }
+      ]},
+      { group: "COGS (Cost of Goods Sold)", gls: [
+        { code: "70101xxx", name: "Raw Material Consumption" },
+        { code: "70301xxx", name: "Changes in Inventory" },
+        { code: "70401xxx", name: "Power & Fuel" },
+        { code: "70501xxx", name: "Employee Cost (Factory)" },
+        { code: "70801xxx", name: "Mfg Other Exp (Stores, Contract Labour, R&M, etc.)" }
+      ]}
+    ],
+    unit: "Rs Cr",
+    target: "Growth"
+  },
+  204: {
+    name: "Net Income",
+    section: "Profitability",
+    formula: "Total Revenue - Total Expenses",
+    formulaTerms: [
+      { label: "Total Revenue", key: "totalRevenue" },
+      { label: "Total Expenses", key: "totalExpenses" },
+      { label: "Net Income", key: "netIncome", derived: true },
+      { label: "Net Income Margin", key: "result", derived: true }
+    ],
+    description: "Bottom-line profit after all expenses including operations, depreciation, finance costs, and taxes. The ultimate measure of company profitability.",
+    glAccounts: [
+      { group: "Total Revenue", gls: [
+        { code: "6-series", name: "Revenue from Ops + Other Income" }
+      ]},
+      { group: "Total Expenses", gls: [
+        { code: "7-series", name: "All expense categories" }
+      ]}
+    ],
+    unit: "Rs Cr",
+    target: "Positive"
   }
 };
 
-const toCr = (val) => {
-  if (val === null || val === undefined || val === '--') return '--';
-  return `Rs ${(Number(val) / 10000000).toFixed(2)} Cr`;
-};
 
 const formatTermValue = (val) => {
   if (val === null || val === undefined || val === '--') return <span className="text-muted">--</span>;
@@ -573,6 +657,43 @@ const KPIDetailModal = ({ kpiId, kpiValue, onClose, formulaValues }) => {
               </div>
             </div>
 
+            {/* GL Breakdown (for expense cards with dynamic GL data) */}
+            {detail.hasGLBreakdown && formulaValues && formulaValues.glBreakdown && formulaValues.glBreakdown.length > 0 && (
+              <div className="card border-primary mb-3">
+                <div className="card-header bg-primary bg-opacity-10 py-2">
+                  <div className="fw-bold" style={{ fontSize: "12px", color: "#0d6efd" }}>
+                    GL ACCOUNT BREAKDOWN
+                  </div>
+                </div>
+                <div className="card-body py-2">
+                  <table className="table table-sm table-hover mb-0" style={{ fontSize: "13px" }}>
+                    <thead className="table-light">
+                      <tr>
+                        <th style={{ width: "120px" }}>GL Code</th>
+                        <th>Description</th>
+                        {formulaValues.glBreakdown[0].category && <th>Category</th>}
+                        <th className="text-end" style={{ width: "140px" }}>Amount</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {formulaValues.glBreakdown.map((gl, i) => (
+                        <tr key={i}>
+                          <td className="font-monospace">{gl.glno}</td>
+                          <td>{gl.desc}</td>
+                          {gl.category && <td><span className="badge bg-secondary bg-opacity-25 text-dark" style={{ fontSize: "11px" }}>{gl.category}</span></td>}
+                          <td className="text-end fw-bold">{gl.formatted}</td>
+                        </tr>
+                      ))}
+                      <tr className="table-primary fw-bold">
+                        <td colSpan={formulaValues.glBreakdown[0].category ? 3 : 2}>Total</td>
+                        <td className="text-end">{formatTermValue(formulaValues.result)}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
             {/* Formula Calculated Values */}
             {detail.formulaTerms && formulaValues && (
               <div className="card border-primary mb-3">
@@ -585,15 +706,20 @@ const KPIDetailModal = ({ kpiId, kpiValue, onClose, formulaValues }) => {
                   <table className="table table-sm mb-0" style={{ fontSize: "13px" }}>
                     <tbody>
                       {detail.formulaTerms.map((term, i) => {
-                        const val = formulaValues[term.key];
+                        // Support nested keys like "cogsBreakdown.comc"
+                        let val = term.key.includes('.')
+                          ? term.key.split('.').reduce((obj, k) => obj && obj[k], formulaValues)
+                          : formulaValues[term.key];
                         return (
                           <tr key={i} style={{
                             fontWeight: term.derived ? 'bold' : 'normal',
+                            fontSize: term.indent ? '12px' : undefined,
                             backgroundColor: term.derived ? '#f8f9fa' : 'transparent',
                             borderTop: term.derived ? '2px solid #dee2e6' : undefined
                           }}>
-                            <td style={{ width: "55%" }}>
+                            <td style={{ width: "55%", paddingLeft: term.indent ? "24px" : undefined }}>
                               {term.derived && <span style={{ color: "#0d6efd" }}>= </span>}
+                              {term.indent && <span style={{ color: "#6c757d" }}>└ </span>}
                               {term.label}
                             </td>
                             <td className="text-end fw-bold" style={{

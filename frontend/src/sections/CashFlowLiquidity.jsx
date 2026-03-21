@@ -22,16 +22,16 @@ const formatKPIValue = (kpi) => {
   return `${v.toFixed(2)} ${kpi.unit}`;
 };
 
-const CashFlowLiquidity = ({ month, year }) => {
+const CashFlowLiquidity = ({ month, year, fyear }) => {
   const [kpis, setKpis] = useState([]);
   const [formulaValues, setFormulaValues] = useState({});
   const [loading, setLoading] = useState(true);
   const [selectedKPI, setSelectedKPI] = useState(null);
 
   useEffect(() => {
-    if (!month || !year) return;
+    if (!month && !fyear) return;
     setLoading(true);
-    const params = `?month=${month}&year=${year}`;
+    const params = month && year ? `?month=${month}&year=${year}` : `?fyear=${fyear}`;
     Promise.all([
       axios.get(`${API}/dashboard${params}`),
       axios.get(`${API}/kpi-formula-values${params}`)
@@ -43,7 +43,7 @@ const CashFlowLiquidity = ({ month, year }) => {
         setLoading(false);
       })
       .catch(() => setLoading(false));
-  }, [month, year]);
+  }, [month, year, fyear]);
 
   if (loading) {
     return (
